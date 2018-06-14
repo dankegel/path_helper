@@ -99,6 +99,27 @@ char* read_segment(const char* line, size_t len) {
 	return segment;
 }
 
+// Append segments from given file.
+
+void append_path_file(char** result, const char* fname) {
+	FILE* f = fopen(fname, "r");
+	if (f == NULL) {
+		perror(fname);
+		return;
+	}
+
+	for (;;) {
+		size_t len;
+		char* line = fgetln(f, &len);
+		if (line == NULL) break;
+		char* segment = read_segment(line, len);
+
+		append_path_segment(result, segment);
+	}
+
+	fclose(f);
+}
+
 // Construct a path variable, starting with the contents
 // of the given environment variable, adding the contents
 // of the default file and files in the path directory.
@@ -122,23 +143,7 @@ char* construct_path(char* env_var, char* defaults_path, char* dir_path) {
 			if (ent->fts_level >= 1) fts_set(fts, ent, FTS_SKIP);
 			continue;
 		}
-
-		FILE* f = fopen(ent->fts_accpath, "r");
-		if (f == NULL) {
-			perror(ent->fts_accpath);
-			continue;
-		}
-
-		for (;;) {
-			size_t len;
-			char* line = fgetln(f, &len);
-			if (line == NULL) break;
-			char* segment = read_segment(line, len);
-			
-			append_path_segment(&result, segment);
-		}
-
-		fclose(f);
+		append_path_file(&result, ent->fts_accpath);
 	}
 	fts_close(fts);
 	
