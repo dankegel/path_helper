@@ -101,12 +101,20 @@ char* read_segment(const char* line, size_t len) {
 
 // Append segments from given file.
 
-void append_path_file(char** result, const char* fname) {
-	FILE* f = fopen(fname, "r");
+void append_path_file(char** result, const char *prefix, const char* fname) {
+	FILE* f;
+
+	int len = strlen(prefix) + strlen(fname) + 2;
+	char *buf = malloc(len);
+	sprintf(buf, "%s/%s", prefix, fname);
+
+	f = fopen(buf, "r");
 	if (f == NULL) {
-		perror(fname);
+		perror(buf);
+		free(buf);
 		return;
 	}
+	free(buf);
 
 	for (;;) {
 		size_t len;
@@ -120,6 +128,38 @@ void append_path_file(char** result, const char* fname) {
 	fclose(f);
 }
 
+// Trivial datastructure for sorting a list of strings
+struct strlist_s {
+	int n;
+	int size;
+	char **strs;
+};
+
+void strlist_init(struct strlist_s *d)
+{
+	d->n = 0;
+	d->size = 100;
+	d->strs = malloc(d->size * sizeof(char *));
+}
+
+void strlist_append(struct strlist_s *d, const char *s)
+{
+	if (d->n == d->size) {
+		d->size *= 2;
+		d->strs = realloc(d->strs, d->size * sizeof(char *));
+	}
+	d->strs[d->n++] = strdup(s);
+}
+
+int strlist_orderfn(const void *a, const void *b) {
+	return strcasecmp(*(char **)a, *(char **)b);
+}
+
+void strlist_sort(struct strlist_s *d)
+{
+	qsort(d->strs, d->n, sizeof(char *), strlist_orderfn);
+}
+
 // Construct a path variable, starting with the contents
 // of the given environment variable, adding the contents
 // of the default file and files in the path directory.
@@ -130,23 +170,33 @@ char* construct_path(char* env_var, char* defaults_path, char* dir_path) {
 
 	char* result = calloc(sizeof(char), 1);
 
-	char* dirpathv[] = { defaults_path, dir_path, NULL };
+	char* dirpathv[] = { dir_path, NULL };
 	fts = fts_open(dirpathv, FTS_PHYSICAL | FTS_XDEV, NULL);
 	if (!fts) {
 		perror(dir_path);
 		return NULL;
 	}
 
+	struct strlist_s files;
+	strlist_init(&files);
 	while ((ent = fts_read(fts)) != NULL) {
 		// only interested in regular files, one level deep
 		if (ent->fts_info != FTS_F) {
 			if (ent->fts_level >= 1) fts_set(fts, ent, FTS_SKIP);
 			continue;
 		}
-		append_path_file(&result, ent->fts_accpath);
+		strlist_append(&files, ent->fts_accpath);
 	}
 	fts_close(fts);
 	
+	// .d directories, by convention, are processed in alphabetical order.
+	strlist_sort(&files);
+
+	append_path_file(&result, "", defaults_path);
+	int i;
+	for (i=0; i<files.n; i++)
+		append_path_file(&result, dir_path, files.strs[i]);
+
 	// merge in any existing custom PATH elemenets
 	char* str = getenv(env_var);
 	if (str) str = strdup(str);
